@@ -7,7 +7,7 @@ from .utils import init_weights, get_padding
 
 import math
 import random
-import numpy as np 
+import numpy as np
 from scipy.signal import get_window
 
 LRELU_SLOPE = 0.1
@@ -46,19 +46,19 @@ class AdaINResBlock1(torch.nn.Module):
                                padding=get_padding(kernel_size, 1)))
         ])
         self.convs2.apply(init_weights)
-        
+
         self.adain1 = nn.ModuleList([
             AdaIN1d(style_dim, channels),
             AdaIN1d(style_dim, channels),
             AdaIN1d(style_dim, channels),
         ])
-        
+
         self.adain2 = nn.ModuleList([
             AdaIN1d(style_dim, channels),
             AdaIN1d(style_dim, channels),
             AdaIN1d(style_dim, channels),
         ])
-        
+
         self.alpha1 = nn.ParameterList([nn.Parameter(torch.ones(1, channels, 1)) for i in range(len(self.convs1))])
         self.alpha2 = nn.ParameterList([nn.Parameter(torch.ones(1, channels, 1)) for i in range(len(self.convs2))])
 
@@ -79,7 +79,7 @@ class AdaINResBlock1(torch.nn.Module):
             remove_weight_norm(l)
         for l in self.convs2:
             remove_weight_norm(l)
-            
+
 class TorchSTFT(torch.nn.Module):
     def __init__(self, filter_length=800, hop_length=200, win_length=800, window='hann'):
         super().__init__()
@@ -107,7 +107,7 @@ class TorchSTFT(torch.nn.Module):
         self.magnitude, self.phase = self.transform(input_data)
         reconstruction = self.inverse(self.magnitude, self.phase)
         return reconstruction
-    
+
 class SineGen(torch.nn.Module):
     """ Definition of sine generator
     SineGen(samp_rate, harmonic_num = 0,
@@ -171,20 +171,20 @@ class SineGen(torch.nn.Module):
 #             cumsum_shift[:, 1:, :] = tmp_over_one_idx * -1.0
 
 #             phase = torch.cumsum(rad_values, dim=1) * 2 * np.pi
-            rad_values = torch.nn.functional.interpolate(rad_values.transpose(1, 2), 
-                                                         scale_factor=1/self.upsample_scale, 
+            rad_values = torch.nn.functional.interpolate(rad_values.transpose(1, 2),
+                                                         scale_factor=1/self.upsample_scale,
                                                          mode="linear").transpose(1, 2)
-    
+
 #             tmp_over_one = torch.cumsum(rad_values, 1) % 1
 #             tmp_over_one_idx = (padDiff(tmp_over_one)) < 0
 #             cumsum_shift = torch.zeros_like(rad_values)
 #             cumsum_shift[:, 1:, :] = tmp_over_one_idx * -1.0
-    
+
             phase = torch.cumsum(rad_values, dim=1) * 2 * np.pi
-            phase = torch.nn.functional.interpolate(phase.transpose(1, 2) * self.upsample_scale, 
+            phase = torch.nn.functional.interpolate(phase.transpose(1, 2) * self.upsample_scale,
                                                     scale_factor=self.upsample_scale, mode="linear").transpose(1, 2)
             sines = torch.sin(phase)
-            
+
         else:
             # If necessary, make sure that the first time step of every
             # voiced segments is sin(pi) or cos(0)
@@ -298,7 +298,7 @@ class SourceModuleHnNSF(torch.nn.Module):
 def padDiff(x):
     return F.pad(F.pad(x, (0,0,-1,1), 'constant', 0) - x, (0,0,0,-1), 'constant', 0)
 
-    
+
 class Generator(torch.nn.Module):
     def __init__(self, style_dim, resblock_kernel_sizes, upsample_rates, upsample_initial_channel, resblock_dilation_sizes, upsample_kernel_sizes, gen_istft_n_fft, gen_istft_hop_size):
         super(Generator, self).__init__()
@@ -314,7 +314,7 @@ class Generator(torch.nn.Module):
         self.f0_upsamp = torch.nn.Upsample(scale_factor=np.prod(upsample_rates) * gen_istft_hop_size)
         self.noise_convs = nn.ModuleList()
         self.noise_res = nn.ModuleList()
-        
+
         self.ups = nn.ModuleList()
         for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
             self.ups.append(weight_norm(
@@ -326,9 +326,9 @@ class Generator(torch.nn.Module):
             ch = upsample_initial_channel//(2**(i+1))
             for j, (k, d) in enumerate(zip(resblock_kernel_sizes,resblock_dilation_sizes)):
                 self.resblocks.append(resblock(ch, k, d, style_dim))
-                
+
             c_cur = upsample_initial_channel // (2 ** (i + 1))
-            
+
             if i + 1 < len(upsample_rates):  #
                 stride_f0 = np.prod(upsample_rates[i + 1:])
                 self.noise_convs.append(Conv1d(
@@ -337,16 +337,16 @@ class Generator(torch.nn.Module):
             else:
                 self.noise_convs.append(Conv1d(gen_istft_n_fft + 2, c_cur, kernel_size=1))
                 self.noise_res.append(resblock(c_cur, 11, [1,3,5], style_dim))
-                
-                
+
+
         self.post_n_fft = gen_istft_n_fft
         self.conv_post = weight_norm(Conv1d(ch, self.post_n_fft + 2, 7, 1, padding=3))
         self.ups.apply(init_weights)
         self.conv_post.apply(init_weights)
         self.reflection_pad = torch.nn.ReflectionPad1d((1, 0))
         self.stft = TorchSTFT(filter_length=gen_istft_n_fft, hop_length=gen_istft_hop_size, win_length=gen_istft_n_fft)
-        
-        
+
+
     def forward(self, x, s, f0):
         with torch.no_grad():
             f0 = self.f0_upsamp(f0[:, None]).transpose(1, 2)  # bs,n,t
@@ -355,7 +355,7 @@ class Generator(torch.nn.Module):
             har_source = har_source.transpose(1, 2).squeeze(1)
             har_spec, har_phase = self.stft.transform(har_source)
             har = torch.cat([har_spec, har_phase], dim=1)
-        
+
         for i in range(self.num_upsamples):
             x = F.leaky_relu(x, LRELU_SLOPE)
             x_source = self.noise_convs[i](har)
@@ -378,7 +378,7 @@ class Generator(torch.nn.Module):
         spec = torch.exp(x[:,:self.post_n_fft // 2 + 1, :])
         phase = torch.sin(x[:, self.post_n_fft // 2 + 1:, :])
         return self.stft.inverse(spec, phase)
-    
+
     def fw_phase(self, x, s):
         for i in range(self.num_upsamples):
             x = F.leaky_relu(x, LRELU_SLOPE)
@@ -406,7 +406,7 @@ class Generator(torch.nn.Module):
         remove_weight_norm(self.conv_pre)
         remove_weight_norm(self.conv_post)
 
-        
+
 class AdainResBlk1d(nn.Module):
     def __init__(self, dim_in, dim_out, style_dim=64, actv=nn.LeakyReLU(0.2),
                  upsample='none', dropout_p=0.0):
@@ -417,13 +417,13 @@ class AdainResBlk1d(nn.Module):
         self.learned_sc = dim_in != dim_out
         self._build_weights(dim_in, dim_out, style_dim)
         self.dropout = nn.Dropout(dropout_p)
-        
+
         if upsample == 'none':
             self.pool = nn.Identity()
         else:
             self.pool = weight_norm(nn.ConvTranspose1d(dim_in, dim_in, kernel_size=3, stride=2, groups=dim_in, padding=1, output_padding=1))
-        
-        
+
+
     def _build_weights(self, dim_in, dim_out, style_dim):
         self.conv1 = weight_norm(nn.Conv1d(dim_in, dim_out, 3, 1, 1))
         self.conv2 = weight_norm(nn.Conv1d(dim_out, dim_out, 3, 1, 1))
@@ -452,7 +452,7 @@ class AdainResBlk1d(nn.Module):
         out = self._residual(x, s)
         out = (out + self._shortcut(x)) / math.sqrt(2)
         return out
-    
+
 class UpSample1d(nn.Module):
     def __init__(self, layer_type):
         super().__init__()
@@ -465,37 +465,37 @@ class UpSample1d(nn.Module):
             return F.interpolate(x, scale_factor=2, mode='nearest')
 
 class Decoder(nn.Module):
-    def __init__(self, dim_in=512, F0_channel=512, style_dim=64, dim_out=80, 
+    def __init__(self, dim_in=512, F0_channel=512, style_dim=64, dim_out=80,
                 resblock_kernel_sizes = [3,7,11],
                 upsample_rates = [10, 6],
                 upsample_initial_channel=512,
                 resblock_dilation_sizes=[[1,3,5], [1,3,5], [1,3,5]],
-                upsample_kernel_sizes=[20, 12], 
+                upsample_kernel_sizes=[20, 12],
                 gen_istft_n_fft=20, gen_istft_hop_size=5):
         super().__init__()
-        
+
         self.decode = nn.ModuleList()
-        
+
         self.encode = AdainResBlk1d(dim_in + 2, 1024, style_dim)
-        
+
         self.decode.append(AdainResBlk1d(1024 + 2 + 64, 1024, style_dim))
         self.decode.append(AdainResBlk1d(1024 + 2 + 64, 1024, style_dim))
         self.decode.append(AdainResBlk1d(1024 + 2 + 64, 1024, style_dim))
         self.decode.append(AdainResBlk1d(1024 + 2 + 64, 512, style_dim, upsample=True))
 
         self.F0_conv = weight_norm(nn.Conv1d(1, 1, kernel_size=3, stride=2, groups=1, padding=1))
-        
+
         self.N_conv = weight_norm(nn.Conv1d(1, 1, kernel_size=3, stride=2, groups=1, padding=1))
-        
+
         self.asr_res = nn.Sequential(
             weight_norm(nn.Conv1d(512, 64, kernel_size=1)),
         )
-        
-        
-        self.generator = Generator(style_dim, resblock_kernel_sizes, upsample_rates, 
-                                   upsample_initial_channel, resblock_dilation_sizes, 
+
+
+        self.generator = Generator(style_dim, resblock_kernel_sizes, upsample_rates,
+                                   upsample_initial_channel, resblock_dilation_sizes,
                                    upsample_kernel_sizes, gen_istft_n_fft, gen_istft_hop_size)
-        
+
     def forward(self, asr, F0_curve, N, s):
         if self.training:
             downlist = [0, 3, 7]
@@ -507,15 +507,15 @@ class Decoder(nn.Module):
             if N_down:
                 N = nn.functional.conv1d(N.unsqueeze(1), torch.ones(1, 1, N_down).to('cpu'), padding=N_down//2).squeeze(1)  / N_down
 
-        
+
         F0 = self.F0_conv(F0_curve.unsqueeze(1))
         N = self.N_conv(N.unsqueeze(1))
-        
+
         x = torch.cat([asr, F0, N], axis=1)
         x = self.encode(x, s)
-        
+
         asr_res = self.asr_res(asr)
-        
+
         res = True
         for block in self.decode:
             if res:
@@ -523,8 +523,7 @@ class Decoder(nn.Module):
             x = block(x, s)
             if block.upsample_type != "none":
                 res = False
-                
+
         x = self.generator(x, s, F0_curve)
         return x
-    
-    
+

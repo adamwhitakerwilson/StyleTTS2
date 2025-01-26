@@ -44,7 +44,6 @@ logger = get_logger(__name__, log_level="DEBUG")
 @click.command()
 @click.option('-p', '--config_path', default='Configs/config.yml', type=str)
 def main(config_path):
-    # print('Time_A:', time.time())
     config = yaml.safe_load(open(config_path))
 
     log_dir = config['log_dir']
@@ -81,7 +80,7 @@ def main(config_path):
 
     # load data
     train_list, val_list = get_data_path_list(train_path, val_path)
-    # print('Time_B:', time.time())
+
     train_dataloader = build_dataloader(train_list,
                                         root_path,
                                         OOD_data=OOD_data,
@@ -102,7 +101,6 @@ def main(config_path):
                                       dataset_config={})
 
     with accelerator.main_process_first():
-        # print('Time_C:', time.time())
         # load pretrained ASR model
         ASR_config = config.get('ASR_config', False)
         ASR_path = config.get('ASR_path', False)
@@ -135,7 +133,6 @@ def main(config_path):
     loss_params = Munch(config['loss_params'])
     TMA_epoch = loss_params.TMA_epoch
 
-    # print('Time_D:', time.time())
     for k in model:
         model[k] = accelerator.prepare(model[k])
 
@@ -150,7 +147,6 @@ def main(config_path):
                                 scheduler_params_dict={key: scheduler_params.copy() for key in model},
                                 lr=float(config['optimizer_params'].get('lr', 1e-4)))
 
-    # print('Time_E:', time.time())
     for k, v in optimizer.optimizers.items():
         optimizer.optimizers[k] = accelerator.prepare(optimizer.optimizers[k])
         optimizer.schedulers[k] = accelerator.prepare(optimizer.schedulers[k])
@@ -178,15 +174,14 @@ def main(config_path):
                    model.wd,
                    sr,
                    model_params.slm.sr).to(device)
-    # print('Time_F:', time.time())
+
     for epoch in range(start_epoch, epochs):
         running_loss = 0
         start_time = time.time()
-        print('Start time:', start_time)
+
         _ = [model[key].train() for key in model]
 
         for i, batch in enumerate(train_dataloader):
-            # print('Time_G:', time.time())
             waves = batch[0]
             batch = [b.to(device) for b in batch[1:]]
             texts, input_lengths, _, _, mels, mel_input_length, _ = batch
@@ -233,11 +228,10 @@ def main(config_path):
             gt = []
             wav = []
             st = []
-            # print('Time_H:', time.time())
+
             for bib in range(len(mel_input_length)):
                 mel_length = int(mel_input_length[bib].item() / 2)
-                # print('Time_I:', time.time())
-                # print('bib:', bib)
+
                 random_start = np.random.randint(0, mel_length - mel_len)
                 en.append(asr[bib, :, random_start:random_start + mel_len])
                 gt.append(mels[bib, :, (random_start * 2):((random_start + mel_len) * 2)])
@@ -319,18 +313,13 @@ def main(config_path):
                 optimizer.step('pitch_extractor')
 
             iters = iters + 1
-            # print("Time_J:", time.time())
-            # print("i:", i)
-            # print("log_interval", log_interval)
-            # print("(i + 1) % log_interval:", (i + 1) % log_interval)
 
             if (i + 1) % log_interval == 0 and accelerator.is_main_process:
                 log_print(
                     'Epoch [%d/%d], Step [%d/%d], Mel Loss: %.5f, Gen Loss: %.5f, Disc Loss: %.5f, Mono Loss: %.5f, S2S Loss: %.5f, SLM Loss: %.5f'
                     % (
-                        epoch + 1, epochs, i + 1, len(train_list) // batch_size, running_loss / log_interval,
-                        loss_gen_all,
-                        d_loss, loss_mono, loss_s2s, loss_slm), logger)
+                    epoch + 1, epochs, i + 1, len(train_list) // batch_size, running_loss / log_interval, loss_gen_all,
+                    d_loss, loss_mono, loss_s2s, loss_slm), logger)
 
                 writer.add_scalar('train/mel_loss', running_loss / log_interval, iters)
                 writer.add_scalar('train/gen_loss', loss_gen_all, iters)
